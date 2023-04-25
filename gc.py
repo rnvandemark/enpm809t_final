@@ -12,13 +12,9 @@ from image_analysis import *
 from email01 import send_snapshot
 
 class Gripper(object):
-    def __init__(self, data_pin, freq, min_dc, max_dc, init_dc):
-        self.data_pin = data_pin
-        self.freq = freq
-        self.min_dc = min_dc
-        self.max_dc = max_dc
-        gpio.setup(self.data_pin, gpio.OUT)
-        self.pwm = gpio.PWM(self.data_pin, self.freq)
+    def __init__(self, init_dc):
+        gpio.setup(PIN_GRIPPER, gpio.OUT)
+        self.pwm = gpio.PWM(PIN_GRIPPER, GRIPPER_FREQ)
         self.set_duty_cycle(init_dc, first=True)
 
     def close(self, final_dc):
@@ -28,10 +24,10 @@ class Gripper(object):
 
     def set_duty_cycle(self, dc, first=False):
         fixed_dc = dc
-        if fixed_dc > self.max_dc:
-            fixed_dc = self.max_dc
-        elif fixed_dc < self.min_dc:
-            fixed_dc = self.min_dc
+        if fixed_dc > GRIPPER_DUTY_CYCLE_MAX:
+            fixed_dc = GRIPPER_DUTY_CYCLE_MAX
+        elif fixed_dc < GRIPPER_DUTY_CYCLE_MIN:
+            fixed_dc = GRIPPER_DUTY_CYCLE_MIN
 
         if first:
             self.pwm.start(fixed_dc)
@@ -39,10 +35,6 @@ class Gripper(object):
             self.pwm.ChangeDutyCycle(fixed_dc)
 
         return fixed_dc
-
-class DefaultServoGripper(Gripper):
-    def __init__(self):
-        super().__init__(36, 50, 5.5, 9.5, 9.5)
 
 def init():
     gpio.setmode(gpio.BOARD)
@@ -175,7 +167,7 @@ if "__main__" == __name__:
 
     init()
 
-    gripper = DefaultServoGripper()
+    gripper = Gripper(GRIPPER_INIT_DUTY_CYCLE)
     sleep(3)
 
     grabbed = False
