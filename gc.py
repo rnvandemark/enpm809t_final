@@ -51,8 +51,8 @@ def init():
     gpio.setup(33, gpio.OUT)
     gpio.setup(35, gpio.OUT)
     gpio.setup(37, gpio.OUT)
-    gpio.setup(7, gpio.IN, pull_up_down=gpio.PUD_UP)
-    gpio.setup(12, gpio.IN, pull_up_down=gpio.PUD_UP)
+    gpio.setup(PIN_ENCODER_FRONT_LEFT, gpio.IN, pull_up_down=gpio.PUD_UP)
+    gpio.setup(PIN_ENCODER_BACK_RIGHT, gpio.IN, pull_up_down=gpio.PUD_UP)
 
 def move(v1, v2, v3, v4):
     gpio.output(31, v1)
@@ -103,8 +103,8 @@ def do_motion(move_func, desi_dist_cm, desi_dist_str):
         i = 0
         move_func()
         while True:
-            signal_fl = int(gpio.input(7))
-            signal_br = int(gpio.input(12))
+            signal_fl = int(gpio.input(PIN_ENCODER_FRONT_LEFT))
+            signal_br = int(gpio.input(PIN_ENCODER_BACK_RIGHT))
 
             new_fl = False
             new_br = False
