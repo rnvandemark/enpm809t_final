@@ -5,36 +5,12 @@ import RPi.GPIO as gpio
 from numpy import uint64, pi
 import cv2
 from time import sleep
-from queue import Queue
-from threading import Thread
+from bufferless_video_capture import BufferlessVideoCapture
 
 from email01 import send_snapshot
 
 BLUE_HSV_MIN = ( 95, 110,  75)
 BLUE_HSV_MAX = (135, 180, 160)
-
-class BufferlessVideoCapture(object):
-    def __init__(self):
-        self.cap = cv2.VideoCapture(0)
-        self.q = Queue()
-        t = Thread(target=self.run)
-        t.daemon = True
-        t.start()
-
-    def run(self):
-        while True:
-            ret, frame = self.cap.read()
-            if not ret:
-                break
-            if not self.q.empty():
-                try:
-                    self.q.get_nowait()
-                except Queue.Empty:
-                    pass
-            self.q.put(frame)
-
-    def read(self):
-        return self.q.get()
 
 class Gripper(object):
     def __init__(self, data_pin, freq, min_dc, max_dc, init_dc):
@@ -188,7 +164,7 @@ if "__main__" == __name__:
     show_img = (1 == int(sargv[1]))
 
     # Capture default camera
-    cap = BufferlessVideoCapture()
+    cap = BufferlessVideoCapture(0)
 
     # Create video writer
     writer = cv2.VideoWriter(
