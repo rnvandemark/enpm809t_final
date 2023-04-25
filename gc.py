@@ -9,9 +9,6 @@ from bufferless_video_capture import BufferlessVideoCapture
 
 from email01 import send_snapshot
 
-BLUE_HSV_MIN = ( 95, 110,  75)
-BLUE_HSV_MAX = (135, 180, 160)
-
 class Gripper(object):
     def __init__(self, data_pin, freq, min_dc, max_dc, init_dc):
         self.data_pin = data_pin
