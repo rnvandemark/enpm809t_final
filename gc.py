@@ -6,6 +6,8 @@ from numpy import uint64, pi
 import cv2
 from time import sleep
 from bufferless_video_capture import BufferlessVideoCapture
+from gc_constants import *
+from image_analysis import *
 
 from email01 import send_snapshot
 
@@ -179,31 +181,13 @@ if "__main__" == __name__:
     grabbed = False
     while True:
         bgr_image = cap.read()
-        height, width = bgr_image.shape[:2]
-        half_height = height/2
-        half_width = width/2
-        bgr_image = cv2.warpAffine(
-            src=bgr_image,
-            M=cv2.getRotationMatrix2D(center=(half_width, half_height), angle=180, scale=1),
-            dsize=(width, height)
-        )
-        hsv_image = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2HSV)
-
-        masked_image = cv2.inRange(hsv_image, BLUE_HSV_MIN, BLUE_HSV_MAX)
-        _, thresh = cv2.threshold(masked_image, 127, 255, 0)
-        _, contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        have_block = (len(contours) > 0)
+        bgr_image, have_block, enclosed_circle_area, degrees_away = find_target_block(bgr_image, BLUE_HSV_MIN, BLUE_HSV_MAX)
 
         if have_block:
-            (x,y),r = cv2.minEnclosingCircle(max(contours, key=cv2.contourArea))
-            cv2.circle(bgr_image, (int(x), int(y)), int(r), (255,0,255), 2)
-            if show_img:
-                cv2.imshow("Track block", bgr_image)
-
-            oriented = not turn((x - half_width) * 0.061)
+            oriented = not turn(degrees_away)
             if oriented:
                 print("Oriented!")
-                positioned = ((pi * r * r) >= 70000)
+                positioned = (enclosed_circle_area >= 70000)
                 if positioned:
                     print("Positioned! Grabbing...")
                     gripper.set_duty_cycle(5.0)
@@ -220,7 +204,8 @@ if "__main__" == __name__:
                     break
                 else:
                     translate(2)
-        elif show_img:
+
+        if show_img:
             cv2.imshow("Track block", bgr_image)
 
         writer.write(bgr_image)
