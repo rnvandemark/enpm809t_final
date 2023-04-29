@@ -33,19 +33,19 @@ def wait_for_email(searchAddr):
     else:
         print("Exceeded timeout.")
 
-def send_snapshot(to, cc, snapshot_location=None):
+def send_images(to, cc, snapshot_locations=[]):
     recipientAddrs = to + cc
     if len(recipientAddrs) <= 0:
         print("Did not receive any recipients!")
         return
 
     snapshot_timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    if snapshot_location is None:
-        snapshot_location = snapshot_timestamp + ".jpg"
+    if len(snapshot_locations) == 0:
+        snapshot_locations.append(snapshot_timestamp + ".jpg")
         snapshot_command = "raspistill -w 1280 -h 720 -vf -hf -o " + snapshot_location
         system(snapshot_command)
 
-    subject = "Image recorded at " + snapshot_timestamp
+    subject = "Image(s) sent at " + snapshot_timestamp
 
     msg = MIMEMultipart()
     msg["Subject"] = subject
@@ -57,8 +57,9 @@ def send_snapshot(to, cc, snapshot_location=None):
 
     msg.attach(MIMEText(subject))
 
-    with open(snapshot_location, "rb") as fd:
-        msg.attach(MIMEImage(fd.read()))
+    for snapshot_location in snapshot_locations:
+        with open(snapshot_location, "rb") as fd:
+            msg.attach(MIMEImage(fd.read()))
 
     smtp = SMTP("smtp.gmail.com", 587)
     smtp.ehlo()
