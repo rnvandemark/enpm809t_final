@@ -24,6 +24,6 @@ def find_target_block(bgr_image, hsv_min, hsv_max):
         (x,y),r = cv2.minEnclosingCircle(max(contours, key=cv2.contourArea))
         cv2.circle(marked_image, (int(x), int(y)), int(r), (255,0,255), 2)
         enclosed_circle_area = (pi * r * r)
-        degrees_away = ((x - half_width) * 0.061)
+        degrees_away = ((x - half_width) * 0.061) * -1
 
     return marked_image, have_block, enclosed_circle_area, degrees_away
