@@ -1,6 +1,5 @@
 import cv2
-
-from numpy import pi
+from numpy import zeros, uint8
 
 from gc_constants import (
     FIND_TARGET_BLOCK_IMAGE_TOP_CUTOFF,
@@ -24,12 +23,15 @@ def find_target_block(bgr_image, hsv_min, hsv_max):
     _, contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     have_block = (len(contours) > 0)
 
-    enclosed_circle_area = None
+    block_pixel_area = None
     degrees_away = None
     if have_block:
-        (x,y),r = cv2.minEnclosingCircle(max(contours, key=cv2.contourArea))
+        largest_contour = max(contours, key=cv2.contourArea)
+        (x,y),r = cv2.minEnclosingCircle(largest_contour)
         cv2.circle(marked_image, (int(x), int(y)), int(r), (255,0,255), 2)
-        enclosed_circle_area = (pi * r * r)
+        contour_only = cv2.drawContours(zeros(masked_image.shape, uint8), [largest_contour], 0, 255, cv2.FILLED)
+        cv2.imshow("Contour only", contour_only)
+        block_pixel_area = cv2.countNonZero(contour_only)
         degrees_away = ((x - half_width) * 0.061) * -1
 
-    return marked_image, have_block, enclosed_circle_area, degrees_away
+    return marked_image, have_block, block_pixel_area, degrees_away
