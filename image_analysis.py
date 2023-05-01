@@ -6,6 +6,17 @@ from gc_constants import (
     LOCALIZE_TARGET_BLOCK_IMAGE_BOTTOM_CUTOFF,
 )
 
+def find_target_block(bgr_image, hsv_min, hsv_max):
+    height = bgr_image.shape[0]
+    unrotated_top_cutoff = height - LOCALIZE_TARGET_BLOCK_IMAGE_BOTTOM_CUTOFF
+    unrotated_bottom_cutoff = height - LOCALIZE_TARGET_BLOCK_IMAGE_TOP_CUTOFF
+    focused_image = bgr_image[unrotated_top_cutoff:unrotated_bottom_cutoff, :].copy()
+    hsv_image = cv2.cvtColor(focused_image, cv2.COLOR_BGR2HSV)
+    masked_image = cv2.inRange(hsv_image, hsv_min, hsv_max)
+    _, thresh = cv2.threshold(masked_image, 127, 255, 0)
+    _, contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    return (len(contours) > 0)
+
 def localize_target_block(bgr_image, hsv_min, hsv_max):
     height, width = bgr_image.shape[:2]
     half_height = height/2
