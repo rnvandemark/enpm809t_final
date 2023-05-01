@@ -385,19 +385,19 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
 
     while found_block and (not positioned):
         bgr_image = cap.read()
-        bgr_image, found_block, block_pixel_area, degrees_away = find_target_block(bgr_image, target_hsv_min, target_hsv_max)
+        bgr_image, found_block, block_pixel_area, degrees_away = localize_target_block(bgr_image, target_hsv_min, target_hsv_max)
 #        print("{0} | {1}".format(block_pixel_area, degrees_away))
         cv2.imshow("Found block", bgr_image)
         print(block_pixel_area)
         if found_block:
-            oriented = (abs(degrees_away) < FIND_TARGET_BLOCK_MAX_DEGREE_OFFSET_ORIENTED)
+            oriented = (abs(degrees_away) < LOCALIZE_TARGET_BLOCK_MAX_DEGREE_OFFSET_ORIENTED)
             if oriented:
 #                print("Oriented!")
-                positioned = (block_pixel_area >= FIND_TARGET_BLOCK_PIXEL_AREA_POSITIONED)
+                positioned = (block_pixel_area >= LOCALIZE_TARGET_BLOCK_PIXEL_AREA_POSITIONED)
                 if positioned:
                     print("Positioned!")
                 else:
-                    approached = (block_pixel_area >= FIND_TARGET_BLOCK_PIXEL_AREA_APPROACHED)
+                    approached = (block_pixel_area >= LOCALIZE_TARGET_BLOCK_PIXEL_AREA_APPROACHED)
                     if approached:
 #                        print("Approached!")
                         if not fine_tune_translating:

@@ -2,11 +2,11 @@ import cv2
 from numpy import zeros, uint8
 
 from gc_constants import (
-    FIND_TARGET_BLOCK_IMAGE_TOP_CUTOFF,
-    FIND_TARGET_BLOCK_IMAGE_BOTTOM_CUTOFF,
+    LOCALIZE_TARGET_BLOCK_IMAGE_TOP_CUTOFF,
+    LOCALIZE_TARGET_BLOCK_IMAGE_BOTTOM_CUTOFF,
 )
 
-def find_target_block(bgr_image, hsv_min, hsv_max):
+def localize_target_block(bgr_image, hsv_min, hsv_max):
     height, width = bgr_image.shape[:2]
     half_height = height/2
     half_width = width/2
@@ -15,7 +15,7 @@ def find_target_block(bgr_image, hsv_min, hsv_max):
         M=cv2.getRotationMatrix2D(center=(half_width, half_height), angle=180, scale=1),
         dsize=(width, height)
     )
-    marked_image = marked_image[FIND_TARGET_BLOCK_IMAGE_TOP_CUTOFF:FIND_TARGET_BLOCK_IMAGE_BOTTOM_CUTOFF, :]
+    marked_image = marked_image[LOCALIZE_TARGET_BLOCK_IMAGE_TOP_CUTOFF:LOCALIZE_TARGET_BLOCK_IMAGE_BOTTOM_CUTOFF, :]
     hsv_image = cv2.cvtColor(marked_image, cv2.COLOR_BGR2HSV)
 
     masked_image = cv2.inRange(hsv_image, hsv_min, hsv_max)
