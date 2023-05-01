@@ -38,18 +38,18 @@ class Gripper(object):
 
 def init():
     gpio.setmode(gpio.BOARD)
-    gpio.setup(31, gpio.OUT)
-    gpio.setup(33, gpio.OUT)
-    gpio.setup(35, gpio.OUT)
-    gpio.setup(37, gpio.OUT)
+    gpio.setup(PIN_MOTOR_FRONT_LEFT_PRI, gpio.OUT)
+    gpio.setup(PIN_MOTOR_FRONT_LEFT_SEC, gpio.OUT)
+    gpio.setup(PIN_MOTOR_BACK_RIGHT_SEC, gpio.OUT)
+    gpio.setup(PIN_MOTOR_BACK_RIGHT_PRI, gpio.OUT)
     gpio.setup(PIN_ENCODER_FRONT_LEFT, gpio.IN, pull_up_down=gpio.PUD_UP)
     gpio.setup(PIN_ENCODER_BACK_RIGHT, gpio.IN, pull_up_down=gpio.PUD_UP)
 
 def move(v1, v2, v3, v4):
-    gpio.output(31, v1)
-    gpio.output(33, v2)
-    gpio.output(35, v3)
-    gpio.output(37, v4)
+    gpio.output(PIN_MOTOR_FRONT_LEFT_PRI, v1)
+    gpio.output(PIN_MOTOR_FRONT_LEFT_SEC, v2)
+    gpio.output(PIN_MOTOR_BACK_RIGHT_SEC, v3)
+    gpio.output(PIN_MOTOR_BACK_RIGHT_PRI, v4)
 
 def stop():
     move(False, False, False, False)
