@@ -79,6 +79,99 @@ class BufferlessDistanceSensor(object):
             return self.last_distance
         return None
 
+class TranslationWrapper(object):
+    def __init__(self):
+        self.x_f = None
+        self.y_f = None
+        self.data_x = None
+        self.data_y = None
+
+        self.pwm_fl = None
+        self.pwm_br = None
+
+        self.fast_translating = False
+        self.fine_tune_translating = False
+
+        self.translation_tracking_thread = None
+        self.continue_tracking_translation = False
+
+    def start_translation_tracking_thread(self, imu, x_i, y_i):
+        self.x_f = x_i
+        self.y_f = y_i
+        self.data_x = []
+        self.data_y = []
+        self.continue_tracking_translation = True
+        self.translation_tracking_thread = Thread(target=self.track_translation, args=(imu,))
+        self.translation_tracking_thread.start()
+
+    def stop_translation_tracking_thread(self):
+        self.continue_tracking_translation = False
+        self.translation_tracking_thread.join()
+        self.translation_tracking_thread = None
+        return self.data_x, self.data_y, self.x_f, self.y_f
+
+    def start_fine_tune_translation(self, imu, x_i, y_i):
+        print("STARTING fine tune translation")
+        self.start_translation_tracking_thread(imu, x_i, y_i)
+        self.pwm_fl = gpio.PWM(PIN_MOTOR_FRONT_LEFT_PRI, 50)
+        self.pwm_br = gpio.PWM(PIN_MOTOR_BACK_RIGHT_PRI, 50)
+        self.pwm_fl.start(SLOW_TRANSLATION_MOTOR_PWM_FRONT_LEFT)
+        self.pwm_br.start(SLOW_TRANSLATION_MOTOR_PWM_BACK_RIGHT)
+        self.fine_tune_translating = True
+
+    def stop_fine_tune_translation(self):
+        print("STOPPING fine tune translation")
+        self.pwm_fl.stop()
+        self.pwm_br.stop()
+        sleep(STOP_TRANSLATION_SLEEP_SECONDS)
+        self.pwm_fl = None
+        self.pwm_br = None
+        self.fine_tune_translating = False
+        return self.stop_translation_tracking_thread()
+
+    def start_fast_translation(self, move_func, imu, x_i, y_i):
+        print("STARTING fast translation")
+        self.start_translation_tracking_thread(imu, x_i, y_i)
+        move_func()
+        self.fast_translating = True
+
+    def stop_fast_translation(self, stop_func):
+        print("STOPPING fast translation")
+        stop_func()
+        sleep(STOP_TRANSLATION_SLEEP_SECONDS)
+        self.fast_translating = False
+        return self.stop_translation_tracking_thread()
+
+    def track_translation(self, imu):
+        new_fl = False
+        new_br = False
+        counter_fl = uint64(0)
+        button_fl = int(gpio.input(PIN_ENCODER_FRONT_LEFT))
+        counter_br = uint64(0)
+        button_br = int(gpio.input(PIN_ENCODER_BACK_RIGHT))
+
+        while self.continue_tracking_translation:
+            signal_fl = int(gpio.input(PIN_ENCODER_FRONT_LEFT))
+            signal_br = int(gpio.input(PIN_ENCODER_BACK_RIGHT))
+
+            new_fl = False
+            new_br = False
+            if signal_fl != button_fl:
+                button_fl = signal_fl
+                counter_fl += 1
+                new_fl = True
+            if signal_br != button_br:
+                button_br = signal_br
+                counter_br += 1
+                new_br = True
+
+            if new_fl or new_br:
+                orientation_rads = imu.read()
+                self.x_f += (APPROX_CM_PER_TICK * cos(orientation_rads))
+                self.y_f += (APPROX_CM_PER_TICK * sin(orientation_rads))
+                self.data_x.append(self.x_f)
+                self.data_y.append(self.y_f)
+
 def init():
     gpio.setmode(gpio.BOARD)
     gpio.setup(PIN_MOTOR_FRONT_LEFT_PRI, gpio.OUT)
@@ -289,106 +382,26 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
 
     positioned = False
     found_block = True
-    fast_translating = False
-    fine_tune_translating = False
     bgr_image = None
-
-    pwm_fl = None
-    pwm_br = None
 
     x_f = x_i
     y_f = y_i
     data_x = []
     data_y = []
 
-    translation_monitoring_thread = None
-    continue_monitoring_translation = False
+    translation_wrapper = TranslationWrapper()
 
-    def monitor_translation():
-        nonlocal continue_monitoring_translation, \
-            x_f, y_f, data_x, data_y
-
-        new_fl = False
-        new_br = False
-        counter_fl = uint64(0)
-        button_fl = int(gpio.input(PIN_ENCODER_FRONT_LEFT))
-        counter_br = uint64(0)
-        button_br = int(gpio.input(PIN_ENCODER_BACK_RIGHT))
-
-        while continue_monitoring_translation:
-            signal_fl = int(gpio.input(PIN_ENCODER_FRONT_LEFT))
-            signal_br = int(gpio.input(PIN_ENCODER_BACK_RIGHT))
-
-            new_fl = False
-            new_br = False
-            if signal_fl != button_fl:
-                button_fl = signal_fl
-                counter_fl += 1
-                new_fl = True
-            if signal_br != button_br:
-                button_br = signal_br
-                counter_br += 1
-                new_br = True
-
-            if new_fl or new_br:
-                orientation_rads = imu.read()
-                x_f += (APPROX_CM_PER_TICK * cos(orientation_rads))
-                y_f += (APPROX_CM_PER_TICK * sin(orientation_rads))
-                data_x.append(x_f)
-                data_y.append(y_f)
-
-    def start_translation_monitoring_thread():
-        nonlocal continue_monitoring_translation, \
-            translation_monitoring_thread
-        continue_monitoring_translation = True
-        translation_monitoring_thread = Thread(target=monitor_translation)
-        translation_monitoring_thread.start()
-
-    def stop_translation_monitoring_thread():
-        nonlocal continue_monitoring_translation, \
-            translation_monitoring_thread
-        continue_monitoring_translation = False
-        translation_monitoring_thread.join()
-        translation_monitoring_thread = None
-
-    def start_fine_tune_translation():
-        nonlocal pwm_fl, pwm_br, fine_tune_translating
-        start_translation_monitoring_thread()
-        pwm_fl = gpio.PWM(PIN_MOTOR_FRONT_LEFT_PRI, 50)
-        pwm_br = gpio.PWM(PIN_MOTOR_BACK_RIGHT_PRI, 50)
-        pwm_fl.start(SLOW_TRANSLATION_MOTOR_PWM_FRONT_LEFT)
-        pwm_br.start(SLOW_TRANSLATION_MOTOR_PWM_BACK_RIGHT)
-        fine_tune_translating = True
-
-    def stop_fine_tune_translation():
-        nonlocal pwm_fl, pwm_br, fine_tune_translating
-        pwm_fl.stop()
-        pwm_br.stop()
-        sleep(0.8)
-        pwm_fl = None
-        pwm_br = None
-        fine_tune_translating = False
-        stop_translation_monitoring_thread()
-
-    def start_fast_translation():
-        nonlocal fast_translating
-        start_translation_monitoring_thread()
-        forward()
-        fast_translating = True
-
-    def stop_fast_translation():
-        nonlocal fast_translating
-        stop()
-        sleep(0.8)
-        fast_translating = False
-        stop_translation_monitoring_thread()
+    def consume_translation_data(data):
+        nonlocal data_x, data_y, x_f, y_f
+        new_data_x, new_data_y, x_f, y_f = data
+        data_x.extend(new_data_x)
+        data_y.extend(new_data_y)
 
     while found_block and (not positioned):
         bgr_image = cap.read()
         bgr_image, found_block, block_pixel_area, degrees_away = localize_target_block(bgr_image, target_hsv_min, target_hsv_max)
 #        print("{0} | {1}".format(block_pixel_area, degrees_away))
         cv2.imshow("Found block", bgr_image)
-        print(block_pixel_area)
         if found_block:
             oriented = (abs(degrees_away) < LOCALIZE_TARGET_BLOCK_MAX_DEGREE_OFFSET_ORIENTED)
             if oriented:
@@ -400,28 +413,26 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
                     approached = (block_pixel_area >= LOCALIZE_TARGET_BLOCK_PIXEL_AREA_APPROACHED)
                     if approached:
 #                        print("Approached!")
-                        if not fine_tune_translating:
-                            if fast_translating:
-                                stop_fast_translation()
-                                fast_translating = False
-                            start_fine_tune_translation()
-                    elif not fast_translating:
-                        start_fast_translation()
-                        fast_translating = True
+                        if not translation_wrapper.fine_tune_translating:
+                            if translation_wrapper.fast_translating:
+                                consume_translation_data(translation_wrapper.stop_fast_translation(stop))
+                            translation_wrapper.start_fine_tune_translation(imu, x_f, y_f)
+                    elif not translation_wrapper.fast_translating:
+                        translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
             else:
-                if fine_tune_translating:
-                    stop_fine_tune_translation()
-                if fast_translating:
-                    stop_fast_translation()
+                if translation_wrapper.fine_tune_translating:
+                    consume_translation_data(translation_wrapper.stop_fine_tune_translation())
+                if translation_wrapper.fast_translating:
+                    consume_translation_data(translation_wrapper.stop_fast_translation(stop))
                 handle_turn_using_imu(degrees_away, imu)
 
         if 27 == (cv2.waitKey(1) & 0xEFFFFF):
             break
 
-    if fine_tune_translating:
-        stop_fine_tune_translation()
-    if fast_translating:
-        stop_fast_translation()
+    if translation_wrapper.fine_tune_translating:
+        consume_translation_data(translation_wrapper.stop_fine_tune_translation())
+    if translation_wrapper.fast_translating:
+        consume_translation_data(translation_wrapper.stop_fast_translation(stop))
 
     return bgr_image, data_x, data_y, x_f, y_f
 
