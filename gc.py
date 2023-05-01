@@ -7,10 +7,10 @@ import RPi.GPIO as gpio
 from numpy import uint64, pi, deg2rad, rad2deg
 import cv2
 from math import sin, cos
-from time import sleep
+from time import sleep, time
 from datetime import datetime
 import matplotlib.pyplot as plt
-from threading import Thread
+from threading import Thread, Lock
 
 from bufferless_imu import BufferlessImu
 from bufferless_video_capture import BufferlessVideoCapture
@@ -44,6 +44,40 @@ class Gripper(object):
             self.pwm.ChangeDutyCycle(fixed_dc)
 
         return fixed_dc
+
+class BufferlessDistanceSensor(object):
+    def __init__(self):
+        gpio.setup(PIN_DISTANCE_SENSOR_TRIG, gpio.OUT)
+        gpio.setup(PIN_DISTANCE_SENSOR_ECHO, gpio.IN)
+        self.last_distance = None
+        self.lock = Lock()
+        t = Thread(target=self.run)
+        t.daemon = True
+        t.start()
+
+    def run(self):
+        while True:
+            gpio.output(PIN_DISTANCE_SENSOR_TRIG, False)
+            sleep(0.01)
+
+            gpio.output(PIN_DISTANCE_SENSOR_TRIG, True)
+            sleep(0.00001)
+            gpio.output(PIN_DISTANCE_SENSOR_TRIG, False)
+
+            pulse_start = time()
+            while gpio.input(PIN_DISTANCE_SENSOR_ECHO) == 0:
+                pulse_start = time()
+
+            while gpio.input(PIN_DISTANCE_SENSOR_ECHO) == 1:
+                pulse_end = time()
+
+            with self.lock:
+                self.last_distance = round((pulse_end-pulse_start) * 17150, 2)
+
+    def read(self):
+        with self.lock:
+            return self.last_distance
+        return None
 
 def init():
     gpio.setmode(gpio.BOARD)
