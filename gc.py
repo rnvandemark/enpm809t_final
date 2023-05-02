@@ -305,6 +305,14 @@ def handle_turn_using_imu(desi_input, imu):
 
     stop()
 
+def handle_set_orientation_using_imu(desi_orientation, imu):
+    desi_input = desi_orientation - imu.read()
+    if desi_input > 180.0:
+        desi_input -= 360.0
+    elif desi_input < -180.0:
+        desi_input += 360.0
+    handle_turn_using_imu(desi_input, imu)
+
 def handle_translation(move_func, desi_input, imu, x_i, y_i):
     desi_wheel_revs = desi_input / (pi * 6.5)
     desi_enc_ticks = 20 * desi_wheel_revs
