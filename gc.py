@@ -73,7 +73,7 @@ class BufferlessDistanceSensor(object):
             while gpio.input(PIN_DISTANCE_SENSOR_ECHO) == 1:
                 pulse_end = time()
 
-            new_distance = round((pulse_end-pulse_start) * 17150, 2)
+            new_distance = min(round((pulse_end-pulse_start) * 17150, 2), DISTANCE_SENSOR_MAX_RELIABLE_READING)
             old_distance = None
             if self.sample_queue.qsize() >= DISTANCE_SENSOR_ROLLING_AVERAGE_SAMPLE_SIZE:
                 try:
@@ -85,6 +85,7 @@ class BufferlessDistanceSensor(object):
                 self.sample_sum += new_distance
                 if old_distance is not None:
                     self.sample_sum -= old_distance
+#            print("Avg dist: " + str(self.read()))
 
     def read(self):
         with self.lock:
@@ -106,6 +107,8 @@ class TranslationWrapper(object):
 
         self.translation_tracking_thread = None
         self.continue_tracking_translation = False
+
+        self.lock = Lock()
 
     def start_translation_tracking_thread(self, imu, x_i, y_i):
         self.x_f = x_i
@@ -179,10 +182,16 @@ class TranslationWrapper(object):
 
             if new_fl or new_br:
                 orientation_rads = imu.read()
-                self.x_f += (APPROX_CM_PER_TICK * cos(orientation_rads) / 2.0)
-                self.y_f += (APPROX_CM_PER_TICK * sin(orientation_rads) / 2.0)
+                with self.lock:
+                    self.x_f += (APPROX_CM_PER_TICK * cos(orientation_rads) / 2.0)
+                    self.y_f += (APPROX_CM_PER_TICK * sin(orientation_rads) / 2.0)
                 self.data_x.append(self.x_f)
                 self.data_y.append(self.y_f)
+
+    def get_current_displacement(self):
+        with self.lock:
+            return (self.x_f, self.y_f)
+        return None
 
 def init():
     gpio.setmode(gpio.BOARD)
@@ -318,11 +327,13 @@ def handle_turn_using_imu(desi_input, imu):
     stop()
 
 def handle_set_orientation_using_imu(desi_orientation, imu):
-    desi_input = desi_orientation - imu.read()
-    if desi_input > 180.0:
-        desi_input -= 360.0
-    elif desi_input < -180.0:
-        desi_input += 360.0
+    curr_orientation = rad2deg(imu.read())
+    desi_input = desi_orientation - rad2deg(imu.read())
+#    print("desi={0}, curr={1}, diff={2}".format(desi_orientation, curr_orientation, desi_input))
+    if desi_input > 180:
+        desi_input -= 360
+    elif desi_input < -180:
+        desi_input += 360
     handle_turn_using_imu(desi_input, imu)
 
 def handle_translation(move_func, desi_input, imu, x_i, y_i):
@@ -463,6 +474,57 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
 
     return positioned, bgr_image, data_x, data_y, x_f, y_f
 
+def change_block_grip(gripper, close):
+    gripper.set_duty_cycle(GRIPPER_DUTY_CYCLE_MIN if close else GRIPPER_DUTY_CYCLE_MAX)
+    sleep(1)
+
+def get_to_next_block_drop_point(distance_sensor, imu, x_i, y_i):
+    x_f = x_i
+    y_f = y_i
+    data_x = []
+    data_y = []
+
+    translation_wrapper = TranslationWrapper()
+
+    def consume_translation_data(data):
+        nonlocal data_x, data_y, x_f, y_f
+        new_data_x, new_data_y, x_f, y_f = data
+        data_x.extend(new_data_x)
+        data_y.extend(new_data_y)
+
+    handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_OPPOSITE_WALL, imu)
+    sleep(1.0)
+
+    est_x, est_y = x_f, y_f
+    if (est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
+        translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
+        while (est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
+            sleep(0.02)
+            est_x, est_y = translation_wrapper.get_current_displacement()
+        consume_translation_data(translation_wrapper.stop_fast_translation(stop))
+        sleep(1.0)
+
+    handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_ADJACENT_WALL, imu)
+    sleep(1.0)
+
+    if (est_x > GET_TO_DROP_POINT_MIN_EST_X_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
+        translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
+        while (est_x > GET_TO_DROP_POINT_MIN_EST_X_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
+            sleep(0.02)
+            est_x, est_y = translation_wrapper.get_current_displacement()
+        consume_translation_data(translation_wrapper.stop_fast_translation(stop))
+
+    return data_x, data_y, x_f, y_f
+
+def back_off_block_drop_point(imu, x_i, y_i):
+    translation_wrapper = TranslationWrapper()
+    translation_wrapper.start_fast_translation(reverse, imu, x_i, y_i)
+    sleep(1.0)
+    data_x, data_y, x_f, y_f = translation_wrapper.stop_fast_translation(stop)
+    sleep(1.0)
+    handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_AFTER_DROP_POINT, imu)
+    return data_x, data_y, x_f, y_f
+
 if "__main__" == __name__:
     # Capture default camera
     cap = BufferlessVideoCapture(0)
@@ -480,6 +542,9 @@ if "__main__" == __name__:
 
     # Init motor control
     init()
+
+    # Init distance sensor
+    distance_sensor = BufferlessDistanceSensor()
 
     # Init gripper
     gripper = Gripper(GRIPPER_INIT_DUTY_CYCLE)
@@ -509,15 +574,30 @@ if "__main__" == __name__:
                 find_next_block(cap, hsv_threshold_pair_idx, imu)
                 positioned, positioned_image, new_data_x, new_data_y, x_f, y_f = get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i)
 
-            gripper.set_duty_cycle(GRIPPER_DUTY_CYCLE_MIN)
-            sleep(1)
-
             cv2.imshow("Found block", positioned_image)
             block_image_path = ojoin(image_dir, "block_{0}.jpg".format(i))
             cv2.imwrite(block_image_path, positioned_image)
             image_paths.append(block_image_path)
 
-            print("Motion: [{0}, {1}] -> [{2}, {3}]".format(x_i, y_i, x_f, y_f))
+            print("TRANSLATION [get to block {0} pick point]: [{1}, {2}] -> [{3}, {4}]".format(i, x_i, y_i, x_f, y_f))
+            data_x.extend(new_data_x)
+            data_y.extend(new_data_y)
+            x_i, y_i = x_f, y_f
+
+            change_block_grip(gripper, True)
+
+            new_data_x, new_data_y, x_f, y_f = get_to_next_block_drop_point(distance_sensor, imu, x_i, y_i)
+
+            print("TRANSLATION [get to block {0} drop point]: [{1}, {2}] -> [{3}, {4}]".format(i, x_i, y_i, x_f, y_f))
+            data_x.extend(new_data_x)
+            data_y.extend(new_data_y)
+            x_i, y_i = x_f, y_f
+
+            change_block_grip(gripper, False)
+
+            new_data_x, new_data_y, x_f, y_f = back_off_block_drop_point(imu, x_i, y_i)
+
+            print("TRANSLATION [back off block {0} drop point]: [{1}, {2}] -> [{3}, {4}]".format(i, x_i, y_i, x_f, y_f))
             data_x.extend(new_data_x)
             data_y.extend(new_data_y)
             x_i, y_i = x_f, y_f
