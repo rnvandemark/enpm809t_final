@@ -377,6 +377,15 @@ def handle_translation(move_func, desi_input, imu, x_i, y_i):
 
     return data_x, data_y, x_f, y_f
 
+def find_next_block(cap, hsv_threshold_pair_idx, imu):
+    target_hsv_min, target_hsv_max = THRESHOLD_HSV_PAIRS[hsv_threshold_pair_idx]
+
+    found_block = False
+    while not found_block:
+        handle_turn_using_imu(FIND_TARGET_BLOCK_TURN_DEGREES, imu)
+        sleep(FIND_TARGET_BLOCK_SLEEP_SECONDS)
+        found_block = find_target_block(cap.read(), target_hsv_min, target_hsv_max)
+
 def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
     target_hsv_min, target_hsv_max = THRESHOLD_HSV_PAIRS[hsv_threshold_pair_idx]
 
@@ -434,7 +443,7 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
     if translation_wrapper.fast_translating:
         consume_translation_data(translation_wrapper.stop_fast_translation(stop))
 
-    return bgr_image, data_x, data_y, x_f, y_f
+    return positioned, bgr_image, data_x, data_y, x_f, y_f
 
 if "__main__" == __name__:
     # Capture default camera
@@ -468,39 +477,49 @@ if "__main__" == __name__:
     data_x = []
     data_y = []
 
+    image_paths = []
     for i, hsv_threshold_pair_idx in enumerate(THRESHOLD_HSV_INDICES_ORDER):
-        block_image_path = ojoin(image_dir, "block_{0}.jpg".format(i))
-
-        grabbed = False
         try:
-            positioned_image, new_data_x, new_data_y, x_f, y_f = get_to_next_block_pick_point(cap, 0, imu, x_i, y_i)
+            positioned = False
+            positioned_image = None
+            new_data_x = None
+            new_data_y = None
+            x_f = None
+            y_f = None
+
+            while not positioned:
+                find_next_block(cap, hsv_threshold_pair_idx, imu)
+                positioned, positioned_image, new_data_x, new_data_y, x_f, y_f = get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i)
+
             gripper.set_duty_cycle(GRIPPER_DUTY_CYCLE_MIN)
-            sleep(2)
+            sleep(1)
+
+            cv2.imshow("Found block", positioned_image)
+            block_image_path = ojoin(image_dir, "block_{0}.jpg".format(i))
+            cv2.imwrite(block_image_path, positioned_image)
+            image_paths.append(block_image_path)
+
             print("Motion: [{0}, {1}] -> [{2}, {3}]".format(x_i, y_i, x_f, y_f))
             data_x.extend(new_data_x)
             data_y.extend(new_data_y)
-            cv2.imshow("Found block", positioned_image)
-            cv2.imwrite(block_image_path, positioned_image)
-            grabbed = True
+            x_i, y_i = x_f, y_f
         except KeyboardInterrupt:
             print("User executed SIGTERM")
+            break
 
-        trajectory_image_path = ojoin(image_dir, "trajectory.jpg")
-        plt.plot(data_x, data_y)
-        plt.title("Robot Trajectory")
-        plt.xlabel("x(t) (cm)")
-        plt.ylabel("y(t) (cm)")
-        plt.savefig(trajectory_image_path, bbox_inches="tight")
+    trajectory_image_path = ojoin(image_dir, "trajectory.jpg")
+    plt.plot(data_x, data_y)
+    plt.title("Robot Trajectory")
+    plt.xlabel("x(t) (cm)")
+    plt.ylabel("y(t) (cm)")
+    plt.savefig(trajectory_image_path, bbox_inches="tight")
+    image_paths.append(trajectory_image_path)
 
-        if grabbed:
-            send_images(
-                ["rnvandemark@gmail.com"],
-                [],
-                snapshot_locations=[
-                    block_image_path,
-                    trajectory_image_path,
-                ]
-            )
+    send_images(
+        ["rnvandemark@gmail.com"],
+        [],
+        snapshot_locations=image_paths
+    )
 
     gripper.close(GRIPPER_INIT_DUTY_CYCLE)
     gameover()
