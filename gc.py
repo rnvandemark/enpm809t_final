@@ -167,8 +167,8 @@ class TranslationWrapper(object):
 
             if new_fl or new_br:
                 orientation_rads = imu.read()
-                self.x_f += (APPROX_CM_PER_TICK * cos(orientation_rads))
-                self.y_f += (APPROX_CM_PER_TICK * sin(orientation_rads))
+                self.x_f += (APPROX_CM_PER_TICK * cos(orientation_rads) / 2.0)
+                self.y_f += (APPROX_CM_PER_TICK * sin(orientation_rads) / 2.0)
                 self.data_x.append(self.x_f)
                 self.data_y.append(self.y_f)
 
