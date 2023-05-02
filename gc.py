@@ -305,8 +305,6 @@ def handle_turn_using_imu(desi_input, imu):
 
     stop()
 
-    return False
-
 def handle_translation(move_func, desi_input, imu, x_i, y_i):
     desi_wheel_revs = desi_input / (pi * 6.5)
     desi_enc_ticks = 20 * desi_wheel_revs
