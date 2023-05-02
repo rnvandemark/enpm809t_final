@@ -11,6 +11,7 @@ from time import sleep, time
 from datetime import datetime
 import matplotlib.pyplot as plt
 from threading import Thread, Lock
+from queue import Queue
 
 from bufferless_imu import BufferlessImu
 from bufferless_video_capture import BufferlessVideoCapture
@@ -49,7 +50,8 @@ class BufferlessDistanceSensor(object):
     def __init__(self):
         gpio.setup(PIN_DISTANCE_SENSOR_TRIG, gpio.OUT)
         gpio.setup(PIN_DISTANCE_SENSOR_ECHO, gpio.IN)
-        self.last_distance = None
+        self.sample_queue = Queue()
+        self.sample_sum = 0.0
         self.lock = Lock()
         t = Thread(target=self.run)
         t.daemon = True
@@ -71,12 +73,22 @@ class BufferlessDistanceSensor(object):
             while gpio.input(PIN_DISTANCE_SENSOR_ECHO) == 1:
                 pulse_end = time()
 
+            new_distance = round((pulse_end-pulse_start) * 17150, 2)
+            old_distance = None
+            if self.sample_queue.qsize() >= DISTANCE_SENSOR_ROLLING_AVERAGE_SAMPLE_SIZE:
+                try:
+                    old_distance = self.sample_queue.get_nowait()
+                except Queue.Empty:
+                    pass
+            self.sample_queue.put(new_distance)
             with self.lock:
-                self.last_distance = round((pulse_end-pulse_start) * 17150, 2)
+                self.sample_sum += new_distance
+                if old_distance is not None:
+                    self.sample_sum -= old_distance
 
     def read(self):
         with self.lock:
-            return self.last_distance
+            return self.sample_sum / DISTANCE_SENSOR_ROLLING_AVERAGE_SAMPLE_SIZE
         return None
 
 class TranslationWrapper(object):
