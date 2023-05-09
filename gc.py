@@ -420,8 +420,12 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
 
     positioned = False
     found_block = True
+    found_obstacle = False
     bgr_image = None
     approached_start = None
+
+    threshold_hsv_pairs_excluding_target = list(THRESHOLD_HSV_PAIRS)
+    del threshold_hsv_pairs_excluding_target[hsv_threshold_pair_idx]
 
     x_f = x_i
     y_f = y_i
@@ -436,7 +440,7 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
         data_x.extend(new_data_x)
         data_y.extend(new_data_y)
 
-    while found_block and (not positioned):
+    while found_block and (not positioned) and (not found_obstacle):
         bgr_image = cap.read()
         bgr_image, found_block, block_pixel_area, degrees_away = localize_target_block(bgr_image, target_hsv_min, target_hsv_max)
 #        print("{0} | {1}".format(block_pixel_area, degrees_away))
@@ -463,7 +467,8 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
                             approached_start = time()
                     else:
                         approached_start = None
-                        if not translation_wrapper.fast_translating:
+                        found_obstacle = find_any_blocks(bgr_image, threshold_hsv_pairs_excluding_target)
+                        if (not found_obstacle) and (not translation_wrapper.fast_translating):
                             translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
             else:
                 approached_start = None
@@ -481,7 +486,19 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
     if translation_wrapper.fast_translating:
         consume_translation_data(translation_wrapper.stop_fast_translation(stop))
 
-    return positioned, bgr_image, data_x, data_y, x_f, y_f
+    return positioned, found_obstacle, bgr_image, data_x, data_y, x_f, y_f
+
+def dodge_block(imu, x_i, y_i):
+    translation_wrapper = TranslationWrapper()
+
+    handle_turn_using_imu(LOCALIZE_TARGET_BLOCK_DODGE_BLOCK_FIRST_TURN_DEGREES, imu)
+    sleep(1.0)
+    translation_wrapper.start_fast_translation(forward, imu, x_i, y_i)
+    sleep(LOCALIZE_TARGET_BLOCK_DODGE_BLOCK_TRANSLATION_TIME_SECONDS)
+    data_x, data_y, x_f, y_f = translation_wrapper.stop_fast_translation(stop)
+    handle_turn_using_imu(LOCALIZE_TARGET_BLOCK_DODGE_BLOCK_SECOND_TURN_DEGREES, imu)
+
+    return data_x, data_y, x_f, y_f
 
 def change_block_grip(gripper, close):
     gripper.set_duty_cycle(GRIPPER_DUTY_CYCLE_MIN if close else GRIPPER_DUTY_CYCLE_MAX)
@@ -572,6 +589,7 @@ if "__main__" == __name__:
     for i, hsv_threshold_pair_idx in enumerate(THRESHOLD_HSV_INDICES_ORDER):
         try:
             positioned = False
+            blocked = False
             positioned_image = None
             new_data_x = None
             new_data_y = None
@@ -580,17 +598,24 @@ if "__main__" == __name__:
 
             while not positioned:
                 find_next_block(cap, hsv_threshold_pair_idx, imu)
-                positioned, positioned_image, new_data_x, new_data_y, x_f, y_f = get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i)
+                positioned, blocked, positioned_image, new_data_x, new_data_y, x_f, y_f = get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i)
+
+                print("TRANSLATION [attempt get to block {0} pick point]: [{1}, {2}] -> [{3}, {4}]".format(i, x_i, y_i, x_f, y_f))
+                data_x.extend(new_data_x)
+                data_y.extend(new_data_y)
+                x_i, y_i = x_f, y_f
+
+                if (not positioned) and blocked:
+                    new_data_x, new_data_y, x_f, y_f = dodge_block(imu, x_i, y_i)
+                    print("TRANSLATION [dodge block getting to block {0} pick point]: [{1}, {2}] -> [{3}, {4}]".format(i, x_i, y_i, x_f, y_f))
+                    data_x.extend(new_data_x)
+                    data_y.extend(new_data_y)
+                    x_i, y_i = x_f, y_f
 
             cv2.imshow("Found block", positioned_image)
             block_image_path = ojoin(image_dir, "block_{0}.jpg".format(i))
             cv2.imwrite(block_image_path, positioned_image)
             image_paths.append(block_image_path)
-
-            print("TRANSLATION [get to block {0} pick point]: [{1}, {2}] -> [{3}, {4}]".format(i, x_i, y_i, x_f, y_f))
-            data_x.extend(new_data_x)
-            data_y.extend(new_data_y)
-            x_i, y_i = x_f, y_f
 
             change_block_grip(gripper, True)
 
