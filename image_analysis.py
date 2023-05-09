@@ -4,7 +4,31 @@ from numpy import zeros, uint8
 from gc_constants import (
     LOCALIZE_TARGET_BLOCK_IMAGE_TOP_CUTOFF,
     LOCALIZE_TARGET_BLOCK_IMAGE_BOTTOM_CUTOFF,
+    LOCALIZE_TARGET_BLOCK_PIXEL_AREA_APPROACHED,
 )
+
+def find_any_blocks(bgr_image, hsv_pairs, area_threshold=LOCALIZE_TARGET_BLOCK_PIXEL_AREA_APPROACHED):
+    height = bgr_image.shape[0]
+    unrotated_top_cutoff = height - LOCALIZE_TARGET_BLOCK_IMAGE_BOTTOM_CUTOFF
+    unrotated_bottom_cutoff = height - LOCALIZE_TARGET_BLOCK_IMAGE_TOP_CUTOFF
+    focused_image = bgr_image[unrotated_top_cutoff:unrotated_bottom_cutoff, :].copy()
+
+    found_block = False
+    for hsv_min, hsv_min in hsv_pairs:
+        hsv_image = cv2.cvtColor(focused_image, cv2.COLOR_BGR2HSV)
+        masked_image = cv2.inRange(hsv_image, hsv_min, hsv_max)
+        _, thresh = cv2.threshold(masked_image, 127, 255, 0)
+        _, contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        block_pixel_area = cv2.countNonZero(cv2.drawContours(
+            zeros(masked_image.shape, uint8),
+            [max(contours, key=cv2.contourArea)],
+            0, 255, cv2.FILLED
+        ))
+        if block_pixel_area >= area_threshold:
+            found_block = True
+            break
+
+    return found_block
 
 def find_target_block(bgr_image, hsv_min, hsv_max):
     height = bgr_image.shape[0]
