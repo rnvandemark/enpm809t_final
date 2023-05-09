@@ -70,6 +70,7 @@ class BufferlessDistanceSensor(object):
             while gpio.input(PIN_DISTANCE_SENSOR_ECHO) == 0:
                 pulse_start = time()
 
+            pulse_end = time()
             while gpio.input(PIN_DISTANCE_SENSOR_ECHO) == 1:
                 pulse_end = time()
 
@@ -80,11 +81,14 @@ class BufferlessDistanceSensor(object):
                     old_distance = self.sample_queue.get_nowait()
                 except Queue.Empty:
                     pass
+#            print("Adding {0}".format(new_distance))
             self.sample_queue.put(new_distance)
             with self.lock:
                 self.sample_sum += new_distance
                 if old_distance is not None:
                     self.sample_sum -= old_distance
+#                    print("Removing {0}".format(old_distance))
+#                print("Sum: " + str(self.sample_sum))
 #            print("Avg dist: " + str(self.read()))
 
     def read(self):
@@ -121,7 +125,8 @@ class TranslationWrapper(object):
 
     def stop_translation_tracking_thread(self):
         self.continue_tracking_translation = False
-        self.translation_tracking_thread.join()
+        if self.translation_tracking_thread is not None:
+            self.translation_tracking_thread.join()
         self.translation_tracking_thread = None
         return self.data_x, self.data_y, self.x_f, self.y_f
 
@@ -418,6 +423,9 @@ def find_next_block(cap, hsv_threshold_pair_idx, imu):
 def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
     target_hsv_min, target_hsv_max = THRESHOLD_HSV_PAIRS[hsv_threshold_pair_idx]
 
+    pixel_area_threshold_approached = LOCALIZE_TARGET_BLOCK_PIXEL_AREA_APPROACHED[hsv_threshold_pair_idx]
+    pixel_area_threshold_positioned = LOCALIZE_TARGET_BLOCK_PIXEL_AREA_POSITIONED[hsv_threshold_pair_idx]
+
     positioned = False
     found_block = True
     found_obstacle = False
@@ -444,19 +452,19 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
         bgr_image = cap.read()
         bgr_image, found_block, block_pixel_area, degrees_away = localize_target_block(bgr_image, target_hsv_min, target_hsv_max)
 #        print("{0} | {1}".format(block_pixel_area, degrees_away))
-        cv2.imshow("Found block", bgr_image)
+#        cv2.imshow("Found block", bgr_image)
         if found_block:
             oriented = (abs(degrees_away) < LOCALIZE_TARGET_BLOCK_MAX_DEGREE_OFFSET_ORIENTED)
             if oriented:
 #                print("Oriented!")
-                positioned = (block_pixel_area >= LOCALIZE_TARGET_BLOCK_PIXEL_AREA_POSITIONED)
+                positioned = (block_pixel_area >= pixel_area_threshold_positioned)
                 if positioned:
                     print("Positioned!")
-                else if (approached_start is not None) and ((time() - approached_start) >= LOCALIZE_TARGET_BLOCK_SLOW_TRANSLATION_TIMEOUT_SECONDS):
+                elif (approached_start is not None) and ((time() - approached_start) >= LOCALIZE_TARGET_BLOCK_SLOW_TRANSLATION_TIMEOUT_SECONDS):
                     print("Approach timeout reached, assuming positioned!")
                     positioned = True
                 else:
-                    approached = (block_pixel_area >= LOCALIZE_TARGET_BLOCK_PIXEL_AREA_APPROACHED)
+                    approached = (block_pixel_area >= pixel_area_threshold_approached)
                     if approached:
 #                        print("Approached!")
                         if not translation_wrapper.fine_tune_translating:
@@ -467,8 +475,13 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
                             approached_start = time()
                     else:
                         approached_start = None
-                        found_obstacle = find_any_blocks(bgr_image, threshold_hsv_pairs_excluding_target)
-                        if (not found_obstacle) and (not translation_wrapper.fast_translating):
+                        if translation_wrapper.fine_tune_translating:
+                            consume_translation_data(translation_wrapper.stop_fine_tune_translation())
+                        found_idx = find_any_blocks(cap.read(), threshold_hsv_pairs_excluding_target)
+                        found_obstacle = (found_idx != -1)
+                        if found_obstacle:
+                            print("Found obstacle within HSV bounds {0}!".format(threshold_hsv_pairs_excluding_target[found_idx]))
+                        elif not translation_wrapper.fast_translating:
                             translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
             else:
                 approached_start = None
@@ -476,7 +489,7 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
                     consume_translation_data(translation_wrapper.stop_fine_tune_translation())
                 if translation_wrapper.fast_translating:
                     consume_translation_data(translation_wrapper.stop_fast_translation(stop))
-                handle_turn_using_imu(degrees_away, imu)
+                handle_turn_using_imu(degrees_away * 0.75, imu)
 
         if 27 == (cv2.waitKey(1) & 0xEFFFFF):
             break
@@ -491,12 +504,19 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
 def dodge_block(imu, x_i, y_i):
     translation_wrapper = TranslationWrapper()
 
+    print("STARTED DODGE")
     handle_turn_using_imu(LOCALIZE_TARGET_BLOCK_DODGE_BLOCK_FIRST_TURN_DEGREES, imu)
+    print("FINISHED FIRST DODGE TURN")
     sleep(1.0)
+    print("STARTING DODGE TRANSLATIOM")
     translation_wrapper.start_fast_translation(forward, imu, x_i, y_i)
     sleep(LOCALIZE_TARGET_BLOCK_DODGE_BLOCK_TRANSLATION_TIME_SECONDS)
     data_x, data_y, x_f, y_f = translation_wrapper.stop_fast_translation(stop)
+    print("FINISHED DODGE TRANSLATION")
+    sleep(1.0)
+    print("STARTED SECOND DODGE TURN")
     handle_turn_using_imu(LOCALIZE_TARGET_BLOCK_DODGE_BLOCK_SECOND_TURN_DEGREES, imu)
+    print("FINISHED SECOND DODGE TURN")
 
     return data_x, data_y, x_f, y_f
 
@@ -518,26 +538,26 @@ def get_to_next_block_drop_point(distance_sensor, imu, x_i, y_i):
         data_x.extend(new_data_x)
         data_y.extend(new_data_y)
 
+    passed_through_once = False
     est_x, est_y = x_f, y_f
-    while (est_x > GET_TO_DROP_POINT_MIN_EST_X_CM) or (est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM):
-        if est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM:
-            handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_OPPOSITE_WALL, imu)
-            sleep(1.0)
-            translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
-            while (est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
-                sleep(0.02)
-                est_x, est_y = translation_wrapper.get_current_displacement()
-            consume_translation_data(translation_wrapper.stop_fast_translation(stop))
-            sleep(1.0)
+    while (not passed_through_once) or (est_x > GET_TO_DROP_POINT_MIN_EST_X_CM) or (est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM):
+        handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_OPPOSITE_WALL, imu)
+        sleep(1.0)
+        translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
+        while (est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
+            sleep(0.02)
+            est_x, est_y = translation_wrapper.get_current_displacement()
+        consume_translation_data(translation_wrapper.stop_fast_translation(stop))
 
-        if est_x > GET_TO_DROP_POINT_MIN_EST_X_CM:
-            handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_ADJACENT_WALL, imu)
-            sleep(1.0)
-            translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
-            while (est_x > GET_TO_DROP_POINT_MIN_EST_X_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
-                sleep(0.02)
-                est_x, est_y = translation_wrapper.get_current_displacement()
-            consume_translation_data(translation_wrapper.stop_fast_translation(stop))
+        handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_ADJACENT_WALL, imu)
+        sleep(1.0)
+        translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
+        while (est_x > GET_TO_DROP_POINT_MIN_EST_X_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
+            sleep(0.02)
+            est_x, est_y = translation_wrapper.get_current_displacement()
+        consume_translation_data(translation_wrapper.stop_fast_translation(stop))
+
+        passed_through_once = True
 
     return data_x, data_y, x_f, y_f
 
@@ -546,7 +566,6 @@ def back_off_block_drop_point(imu, x_i, y_i):
     translation_wrapper.start_fast_translation(reverse, imu, x_i, y_i)
     sleep(1.0)
     data_x, data_y, x_f, y_f = translation_wrapper.stop_fast_translation(stop)
-    sleep(1.0)
     handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_AFTER_DROP_POINT, imu)
     return data_x, data_y, x_f, y_f
 
@@ -612,7 +631,7 @@ if "__main__" == __name__:
                     data_y.extend(new_data_y)
                     x_i, y_i = x_f, y_f
 
-            cv2.imshow("Found block", positioned_image)
+#            cv2.imshow("Found block", positioned_image)
             block_image_path = ojoin(image_dir, "block_{0}.jpg".format(i))
             cv2.imwrite(block_image_path, positioned_image)
             image_paths.append(block_image_path)
@@ -647,8 +666,8 @@ if "__main__" == __name__:
     image_paths.append(trajectory_image_path)
 
     send_images(
+        ["ENPM809TS19@gmail.com"],
         ["rnvandemark@gmail.com"],
-        [],
         snapshot_locations=image_paths
     )
 

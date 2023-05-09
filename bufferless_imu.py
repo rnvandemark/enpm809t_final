@@ -16,11 +16,11 @@ class BufferlessImu(object):
             if (self.ser.in_waiting <= 0) and (self.last_sample is None):
                 sleep(0.05)
             else:
-                self.count += 1
-                line_original = str(self.ser.readline())
-                if self.count > 10:
-                    try:
+                try:
+                    line_original = str(self.ser.readline())
+                    if self.count > 10:
                         self.last_sample = fix_orientation(float(''.join(c for c in line_original if c in "0123456789.")))
-                    except:
-                        pass
+                    self.count += 1
+                except:
+                    pass
         return self.last_sample
