@@ -501,27 +501,26 @@ def get_to_next_block_drop_point(distance_sensor, imu, x_i, y_i):
         data_x.extend(new_data_x)
         data_y.extend(new_data_y)
 
-    handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_OPPOSITE_WALL, imu)
-    sleep(1.0)
-
     est_x, est_y = x_f, y_f
-    if (est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
-        translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
-        while (est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
-            sleep(0.02)
-            est_x, est_y = translation_wrapper.get_current_displacement()
-        consume_translation_data(translation_wrapper.stop_fast_translation(stop))
-        sleep(1.0)
+    while (est_x > GET_TO_DROP_POINT_MIN_EST_X_CM) or (est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM):
+        if est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM:
+            handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_OPPOSITE_WALL, imu)
+            sleep(1.0)
+            translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
+            while (est_y < GET_TO_DROP_POINT_MIN_EST_Y_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
+                sleep(0.02)
+                est_x, est_y = translation_wrapper.get_current_displacement()
+            consume_translation_data(translation_wrapper.stop_fast_translation(stop))
+            sleep(1.0)
 
-    handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_ADJACENT_WALL, imu)
-    sleep(1.0)
-
-    if (est_x > GET_TO_DROP_POINT_MIN_EST_X_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
-        translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
-        while (est_x > GET_TO_DROP_POINT_MIN_EST_X_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
-            sleep(0.02)
-            est_x, est_y = translation_wrapper.get_current_displacement()
-        consume_translation_data(translation_wrapper.stop_fast_translation(stop))
+        if est_x > GET_TO_DROP_POINT_MIN_EST_X_CM:
+            handle_set_orientation_using_imu(RELATIVE_ORIENTATION_TO_FACE_ADJACENT_WALL, imu)
+            sleep(1.0)
+            translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
+            while (est_x > GET_TO_DROP_POINT_MIN_EST_X_CM) or (distance_sensor.read() > GET_TO_DROP_POINT_WALL_BUFFER):
+                sleep(0.02)
+                est_x, est_y = translation_wrapper.get_current_displacement()
+            consume_translation_data(translation_wrapper.stop_fast_translation(stop))
 
     return data_x, data_y, x_f, y_f
 
