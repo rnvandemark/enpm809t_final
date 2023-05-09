@@ -421,6 +421,7 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
     positioned = False
     found_block = True
     bgr_image = None
+    approached_start = None
 
     x_f = x_i
     y_f = y_i
@@ -447,6 +448,9 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
                 positioned = (block_pixel_area >= LOCALIZE_TARGET_BLOCK_PIXEL_AREA_POSITIONED)
                 if positioned:
                     print("Positioned!")
+                else if (approached_start is not None) and ((time() - approached_start) >= LOCALIZE_TARGET_BLOCK_SLOW_TRANSLATION_TIMEOUT_SECONDS):
+                    print("Approach timeout reached, assuming positioned!")
+                    positioned = True
                 else:
                     approached = (block_pixel_area >= LOCALIZE_TARGET_BLOCK_PIXEL_AREA_APPROACHED)
                     if approached:
@@ -455,9 +459,14 @@ def get_to_next_block_pick_point(cap, hsv_threshold_pair_idx, imu, x_i, y_i):
                             if translation_wrapper.fast_translating:
                                 consume_translation_data(translation_wrapper.stop_fast_translation(stop))
                             translation_wrapper.start_fine_tune_translation(imu, x_f, y_f)
-                    elif not translation_wrapper.fast_translating:
-                        translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
+                        if approached_start is None:
+                            approached_start = time()
+                    else:
+                        approached_start = None
+                        if not translation_wrapper.fast_translating:
+                            translation_wrapper.start_fast_translation(forward, imu, x_f, y_f)
             else:
+                approached_start = None
                 if translation_wrapper.fine_tune_translating:
                     consume_translation_data(translation_wrapper.stop_fine_tune_translation())
                 if translation_wrapper.fast_translating:
